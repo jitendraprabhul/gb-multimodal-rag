@@ -1,0 +1,943 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>GraphRAG Multimodal</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            brand: { 50:'#eef2ff',100:'#e0e7ff',200:'#c7d2fe',300:'#a5b4fc',400:'#818cf8',500:'#6366f1',600:'#4f46e5',700:'#4338ca',800:'#3730a3',900:'#312e81' },
+            surface: { 50:'#f8fafc',100:'#f1f5f9',200:'#e2e8f0',700:'#1e293b',800:'#0f172a',900:'#020617' }
+          }
+        }
+      }
+    }
+  </script>
+  <style>
+    [x-cloak] { display: none !important; }
+    body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
+    .fade-in { animation: fadeIn .3s ease-in; }
+    @keyframes fadeIn { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:translateY(0); } }
+    @keyframes pulse-dot { 0%,100%{opacity:1} 50%{opacity:.4} }
+    .pulse-dot { animation: pulse-dot 1.5s infinite; }
+    .scrollbar-thin::-webkit-scrollbar { width: 6px; }
+    .scrollbar-thin::-webkit-scrollbar-track { background: transparent; }
+    .scrollbar-thin::-webkit-scrollbar-thumb { background: #334155; border-radius: 3px; }
+    pre code { white-space: pre-wrap; word-break: break-word; }
+    .glass { background: rgba(15,23,42,.7); backdrop-filter: blur(12px); }
+  </style>
+</head>
+<body class="bg-surface-900 text-slate-200 min-h-screen" x-data="app()" x-init="init()">
+
+  <!-- Top Nav -->
+  <nav class="sticky top-0 z-50 glass border-b border-slate-700/50">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+      <div class="flex items-center justify-between h-16">
+        <div class="flex items-center gap-3">
+          <div class="w-9 h-9 rounded-lg bg-gradient-to-br from-brand-500 to-brand-700 flex items-center justify-center">
+            <svg class="w-5 h-5 text-white" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+              <circle cx="12" cy="5" r="2"/><circle cx="5" cy="19" r="2"/><circle cx="19" cy="19" r="2"/>
+              <path d="M12 7v5m-5.2 4.8L11 14m2 0l4.2 2.8"/>
+            </svg>
+          </div>
+          <span class="text-lg font-bold tracking-tight">GraphRAG</span>
+          <span class="text-xs bg-brand-600/30 text-brand-300 px-2 py-0.5 rounded-full font-medium">Multimodal</span>
+        </div>
+
+        <!-- Tabs -->
+        <div class="hidden sm:flex items-center gap-1">
+          <template x-for="tab in tabs" :key="tab.id">
+            <button @click="activeTab = tab.id"
+              :class="activeTab === tab.id ? 'bg-slate-700/60 text-white' : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/40'"
+              class="px-4 py-2 rounded-lg text-sm font-medium transition-all">
+              <span x-text="tab.label"></span>
+            </button>
+          </template>
+        </div>
+
+        <!-- Status -->
+        <div class="flex items-center gap-3">
+          <div class="flex items-center gap-2 text-xs">
+            <span class="w-2 h-2 rounded-full" :class="health.status === 'healthy' ? 'bg-emerald-400 pulse-dot' : 'bg-red-400'"></span>
+            <span class="text-slate-400" x-text="health.status === 'healthy' ? 'All systems operational' : 'Service issues'"></span>
+          </div>
+        </div>
+      </div>
+    </div>
+    <!-- Mobile tabs -->
+    <div class="sm:hidden border-t border-slate-700/50 px-2 py-2 flex gap-1 overflow-x-auto">
+      <template x-for="tab in tabs" :key="tab.id">
+        <button @click="activeTab = tab.id"
+          :class="activeTab === tab.id ? 'bg-slate-700/60 text-white' : 'text-slate-400'"
+          class="px-3 py-1.5 rounded-lg text-xs font-medium whitespace-nowrap transition-all">
+          <span x-text="tab.label"></span>
+        </button>
+      </template>
+    </div>
+  </nav>
+
+  <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+
+    <!-- ========== DASHBOARD ========== -->
+    <div x-show="activeTab === 'dashboard'" x-cloak class="fade-in space-y-6">
+
+      <!-- API Key Banner -->
+      <div class="bg-slate-800/50 border border-slate-700/50 rounded-xl p-4">
+        <div class="flex items-center gap-3">
+          <svg class="w-5 h-5 text-brand-400 shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+            <path d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z"/>
+          </svg>
+          <input type="password" x-model="apiKey" placeholder="Enter API Key (X-API-Key)"
+            class="flex-1 bg-slate-900/50 border border-slate-600/50 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-brand-500 text-slate-200 placeholder-slate-500">
+          <button @click="showApiKey = !showApiKey; if(showApiKey) $refs.apiInput && ($refs.apiInput.type='text'); else $refs.apiInput && ($refs.apiInput.type='password')"
+            class="text-slate-400 hover:text-slate-200">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+              <path x-show="!showApiKey" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/>
+              <path x-show="showApiKey" d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21"/>
+            </svg>
+          </button>
+          <button @click="loadDashboard()" class="bg-brand-600 hover:bg-brand-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors">
+            Connect
+          </button>
+        </div>
+      </div>
+
+      <!-- Service Health Cards -->
+      <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <template x-for="(ok, svc) in health.services" :key="svc">
+          <div class="bg-slate-800/50 border border-slate-700/50 rounded-xl p-4 flex items-center gap-3">
+            <div class="w-10 h-10 rounded-lg flex items-center justify-center"
+              :class="ok ? 'bg-emerald-500/10 text-emerald-400' : 'bg-red-500/10 text-red-400'">
+              <svg x-show="ok" class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M5 13l4 4L19 7"/></svg>
+              <svg x-show="!ok" class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M6 18L18 6M6 6l12 12"/></svg>
+            </div>
+            <div>
+              <p class="text-sm font-semibold capitalize" x-text="svc"></p>
+              <p class="text-xs" :class="ok ? 'text-emerald-400' : 'text-red-400'" x-text="ok ? 'Operational' : 'Down'"></p>
+            </div>
+          </div>
+        </template>
+      </div>
+
+      <!-- Stats Cards -->
+      <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <div class="bg-gradient-to-br from-brand-600/20 to-slate-800/50 border border-brand-500/20 rounded-xl p-5">
+          <p class="text-xs text-slate-400 uppercase tracking-wider">Documents</p>
+          <p class="text-3xl font-bold mt-1" x-text="stats.documents ?? '--'"></p>
+        </div>
+        <div class="bg-gradient-to-br from-purple-600/20 to-slate-800/50 border border-purple-500/20 rounded-xl p-5">
+          <p class="text-xs text-slate-400 uppercase tracking-wider">Chunks</p>
+          <p class="text-3xl font-bold mt-1" x-text="stats.chunks ?? '--'"></p>
+        </div>
+        <div class="bg-gradient-to-br from-cyan-600/20 to-slate-800/50 border border-cyan-500/20 rounded-xl p-5">
+          <p class="text-xs text-slate-400 uppercase tracking-wider">Entities</p>
+          <p class="text-3xl font-bold mt-1" x-text="stats.graph?.entities ?? '--'"></p>
+        </div>
+        <div class="bg-gradient-to-br from-amber-600/20 to-slate-800/50 border border-amber-500/20 rounded-xl p-5">
+          <p class="text-xs text-slate-400 uppercase tracking-wider">Relations</p>
+          <p class="text-3xl font-bold mt-1" x-text="stats.graph?.relations ?? '--'"></p>
+        </div>
+      </div>
+
+      <!-- Metrics -->
+      <div class="bg-slate-800/50 border border-slate-700/50 rounded-xl p-6" x-show="metrics.requests">
+        <h3 class="text-sm font-semibold text-slate-300 mb-4">Request Metrics</h3>
+        <div class="grid grid-cols-2 md:grid-cols-5 gap-4 text-center">
+          <div>
+            <p class="text-2xl font-bold text-brand-400" x-text="metrics.requests?.total ?? 0"></p>
+            <p class="text-xs text-slate-500 mt-1">Total Requests</p>
+          </div>
+          <div>
+            <p class="text-2xl font-bold text-emerald-400" x-text="computeAvgLatency() + 'ms'"></p>
+            <p class="text-xs text-slate-500 mt-1">Avg Latency</p>
+          </div>
+          <div>
+            <p class="text-2xl font-bold text-amber-400" x-text="metrics.requests?.errors?.total ?? 0"></p>
+            <p class="text-xs text-slate-500 mt-1">Errors</p>
+          </div>
+          <div>
+            <p class="text-2xl font-bold text-cyan-400" x-text="computeSuccessRate() + '%'"></p>
+            <p class="text-xs text-slate-500 mt-1">Success Rate</p>
+          </div>
+          <div>
+            <p class="text-2xl font-bold text-purple-400" x-text="formatUptime(metrics.uptime_seconds)"></p>
+            <p class="text-xs text-slate-500 mt-1">Uptime</p>
+          </div>
+        </div>
+        <!-- Per-endpoint breakdown -->
+        <div x-show="metrics.requests?.by_endpoint" class="mt-4">
+          <button @click="showEndpointBreakdown = !showEndpointBreakdown"
+            class="text-xs text-slate-500 hover:text-slate-300 transition-colors flex items-center gap-1">
+            <svg class="w-3 h-3 transition-transform" :class="showEndpointBreakdown ? 'rotate-90' : ''" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M9 5l7 7-7 7"/></svg>
+            Endpoint breakdown
+          </button>
+          <div x-show="showEndpointBreakdown" class="mt-2 space-y-1">
+            <template x-for="(count, endpoint) in (metrics.requests?.by_endpoint || {})" :key="endpoint">
+              <div class="flex items-center justify-between bg-slate-900/40 rounded-lg px-3 py-1.5">
+                <span class="text-xs text-slate-400 font-mono truncate" x-text="endpoint"></span>
+                <div class="flex items-center gap-3">
+                  <span class="text-xs text-slate-300" x-text="count + ' req'"></span>
+                  <span class="text-xs text-slate-500" x-text="getEndpointLatency(endpoint)"></span>
+                </div>
+              </div>
+            </template>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ========== ASK ========== -->
+    <div x-show="activeTab === 'ask'" x-cloak class="fade-in space-y-6">
+      <div class="bg-slate-800/50 border border-slate-700/50 rounded-xl p-6">
+        <h2 class="text-lg font-bold mb-4">Ask a Question</h2>
+        <div class="space-y-4">
+          <textarea x-model="askForm.question" rows="3" placeholder="e.g. What are the key financial metrics for Q3 2024?"
+            class="w-full bg-slate-900/50 border border-slate-600/50 rounded-lg px-4 py-3 text-sm focus:outline-none focus:border-brand-500 resize-none placeholder-slate-500"
+            @keydown.ctrl.enter="submitAsk()"></textarea>
+          <div class="flex flex-wrap items-center gap-4">
+            <div class="flex items-center gap-2">
+              <label class="text-xs text-slate-400">Top K:</label>
+              <input type="number" x-model.number="askForm.top_k" min="1" max="20"
+                class="w-16 bg-slate-900/50 border border-slate-600/50 rounded-lg px-2 py-1.5 text-sm text-center focus:outline-none focus:border-brand-500">
+            </div>
+            <label class="flex items-center gap-2 text-xs text-slate-400 cursor-pointer">
+              <input type="checkbox" x-model="askForm.include_sources" class="rounded bg-slate-700 border-slate-600 text-brand-500 focus:ring-brand-500">
+              Include Sources
+            </label>
+            <label class="flex items-center gap-2 text-xs text-slate-400 cursor-pointer">
+              <input type="checkbox" x-model="askForm.include_graph_paths" class="rounded bg-slate-700 border-slate-600 text-brand-500 focus:ring-brand-500">
+              Include Graph Paths
+            </label>
+            <div class="flex-1"></div>
+            <button @click="submitAsk()" :disabled="askLoading || !askForm.question.trim()"
+              class="bg-brand-600 hover:bg-brand-700 disabled:opacity-40 disabled:cursor-not-allowed text-white px-6 py-2.5 rounded-lg text-sm font-medium transition-colors flex items-center gap-2">
+              <svg x-show="askLoading" class="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
+              <span x-text="askLoading ? 'Thinking...' : 'Ask'"></span>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Answer -->
+      <template x-if="askResult">
+        <div class="space-y-4 fade-in">
+          <!-- Main Answer -->
+          <div class="bg-slate-800/50 border border-slate-700/50 rounded-xl p-6">
+            <div class="flex items-center justify-between mb-3">
+              <h3 class="text-sm font-semibold text-slate-300">Answer</h3>
+              <div class="flex items-center gap-3">
+                <span class="text-xs px-2 py-1 rounded-full font-medium"
+                  :class="askResult.confidence >= 0.7 ? 'bg-emerald-500/10 text-emerald-400' : askResult.confidence >= 0.4 ? 'bg-amber-500/10 text-amber-400' : 'bg-red-500/10 text-red-400'"
+                  x-text="(askResult.confidence * 100).toFixed(0) + '% confidence'"></span>
+                <span class="text-xs text-slate-500" x-text="askResult.latency_ms.toFixed(0) + 'ms'"></span>
+              </div>
+            </div>
+            <div class="text-slate-200 leading-relaxed whitespace-pre-wrap" x-text="askResult.answer"></div>
+          </div>
+
+          <!-- Reasoning -->
+          <div x-show="askResult.reasoning" class="bg-slate-800/50 border border-slate-700/50 rounded-xl p-6">
+            <h3 class="text-sm font-semibold text-slate-300 mb-3">Reasoning</h3>
+            <div class="text-sm text-slate-400 leading-relaxed whitespace-pre-wrap" x-text="askResult.reasoning"></div>
+          </div>
+
+          <!-- Sources -->
+          <div x-show="askResult.sources?.length > 0" class="bg-slate-800/50 border border-slate-700/50 rounded-xl p-6">
+            <h3 class="text-sm font-semibold text-slate-300 mb-3">Sources</h3>
+            <div class="space-y-3">
+              <template x-for="(src, i) in askResult.sources" :key="i">
+                <div class="bg-slate-900/50 border border-slate-700/30 rounded-lg p-4">
+                  <div class="flex items-center gap-2 mb-2">
+                    <span class="text-xs px-2 py-0.5 rounded bg-slate-700 text-slate-300 font-mono" x-text="src.modality"></span>
+                    <span class="text-xs text-brand-400" x-text="(src.relevance_score * 100).toFixed(0) + '% relevant'"></span>
+                    <span x-show="src.doc_id" class="text-xs text-slate-500" x-text="'Doc: ' + src.doc_id"></span>
+                    <span x-show="src.page_number" class="text-xs text-slate-500" x-text="'Page ' + src.page_number"></span>
+                  </div>
+                  <p class="text-sm text-slate-300 leading-relaxed" x-text="src.content"></p>
+                </div>
+              </template>
+            </div>
+          </div>
+
+          <!-- Graph Paths -->
+          <div x-show="askResult.graph_paths?.length > 0" class="bg-slate-800/50 border border-slate-700/50 rounded-xl p-6">
+            <h3 class="text-sm font-semibold text-slate-300 mb-3">Graph Paths</h3>
+            <div class="space-y-2">
+              <template x-for="(gp, i) in askResult.graph_paths" :key="i">
+                <div class="bg-slate-900/50 border border-slate-700/30 rounded-lg p-3 flex items-center gap-3">
+                  <svg class="w-4 h-4 text-brand-400 shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M13 7l5 5m0 0l-5 5m5-5H6"/></svg>
+                  <span class="text-sm text-slate-300" x-text="gp.path_text"></span>
+                  <span class="text-xs text-slate-500 ml-auto" x-text="(gp.relevance_score * 100).toFixed(0) + '%'"></span>
+                </div>
+              </template>
+            </div>
+          </div>
+        </div>
+      </template>
+    </div>
+
+    <!-- ========== INGEST ========== -->
+    <div x-show="activeTab === 'ingest'" x-cloak class="fade-in space-y-6">
+
+      <!-- File Upload -->
+      <div class="bg-slate-800/50 border border-slate-700/50 rounded-xl p-6">
+        <h2 class="text-lg font-bold mb-1">Upload &amp; Ingest Documents</h2>
+        <p class="text-xs text-slate-500 mb-4">Drag and drop files or click to browse. Supports PDF, TXT, CSV, XLSX, HTML, JSON, and images.</p>
+
+        <!-- Drop Zone -->
+        <div class="relative"
+          @dragover.prevent="uploadDragOver = true"
+          @dragleave.prevent="uploadDragOver = false"
+          @drop.prevent="handleFileDrop($event)">
+          <div class="border-2 border-dashed rounded-xl p-8 text-center transition-all cursor-pointer"
+            :class="uploadDragOver ? 'border-brand-400 bg-brand-500/10' : 'border-slate-600/50 hover:border-slate-500 bg-slate-900/30'"
+            @click="$refs.fileInput.click()">
+            <input type="file" multiple x-ref="fileInput" class="hidden" accept=".pdf,.txt,.csv,.xlsx,.html,.json,.png,.jpg,.jpeg,.gif,.bmp,.tiff"
+              @change="handleFileSelect($event)">
+            <svg class="w-12 h-12 mx-auto mb-3" :class="uploadDragOver ? 'text-brand-400' : 'text-slate-500'" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24">
+              <path d="M12 16V4m0 0L8 8m4-4l4 4M2 17l.621 2.485A2 2 0 004.561 21h14.878a2 2 0 001.94-1.515L22 17"/>
+            </svg>
+            <p class="text-sm" :class="uploadDragOver ? 'text-brand-300' : 'text-slate-400'">
+              <span class="font-semibold text-brand-400">Click to upload</span> or drag and drop
+            </p>
+            <p class="text-xs text-slate-600 mt-1">Multiple files supported</p>
+          </div>
+        </div>
+
+        <!-- Selected Files List -->
+        <div x-show="uploadFiles.length > 0" class="mt-4 space-y-2">
+          <div class="flex items-center justify-between">
+            <p class="text-xs text-slate-400"><span class="font-semibold text-slate-300" x-text="uploadFiles.length"></span> file(s) selected</p>
+            <button @click="uploadFiles = []" class="text-xs text-red-400 hover:text-red-300 transition-colors">Clear all</button>
+          </div>
+          <div class="max-h-40 overflow-y-auto scrollbar-thin space-y-1.5">
+            <template x-for="(file, idx) in uploadFiles" :key="idx">
+              <div class="flex items-center gap-3 bg-slate-900/50 rounded-lg px-3 py-2">
+                <div class="w-8 h-8 rounded-lg bg-brand-600/20 flex items-center justify-center shrink-0">
+                  <span class="text-[10px] font-bold text-brand-400 uppercase" x-text="file.name.split('.').pop()"></span>
+                </div>
+                <div class="flex-1 min-w-0">
+                  <p class="text-sm text-slate-300 truncate" x-text="file.name"></p>
+                  <p class="text-[10px] text-slate-600" x-text="(file.size / 1024).toFixed(1) + ' KB'"></p>
+                </div>
+                <button @click="uploadFiles.splice(idx, 1)" class="text-slate-500 hover:text-red-400 transition-colors shrink-0">
+                  <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M6 18L18 6M6 6l12 12"/></svg>
+                </button>
+              </div>
+            </template>
+          </div>
+        </div>
+
+        <!-- Options -->
+        <div class="flex flex-wrap items-center gap-4 mt-4">
+          <label class="flex items-center gap-2 text-xs text-slate-400 cursor-pointer">
+            <input type="checkbox" x-model="ingestForm.extract_entities" class="rounded bg-slate-700 border-slate-600 text-brand-500 focus:ring-brand-500">
+            Extract Entities
+          </label>
+          <label class="flex items-center gap-2 text-xs text-slate-400 cursor-pointer">
+            <input type="checkbox" x-model="ingestForm.generate_embeddings" class="rounded bg-slate-700 border-slate-600 text-brand-500 focus:ring-brand-500">
+            Generate Embeddings
+          </label>
+          <div class="flex-1"></div>
+          <button @click="submitUpload()" :disabled="uploadLoading || uploadFiles.length === 0"
+            class="bg-brand-600 hover:bg-brand-700 disabled:opacity-40 disabled:cursor-not-allowed text-white px-6 py-2.5 rounded-lg text-sm font-medium transition-colors flex items-center gap-2">
+            <svg x-show="uploadLoading" class="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
+            <svg x-show="!uploadLoading" class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/></svg>
+            <span x-text="uploadLoading ? 'Uploading & Processing...' : 'Upload & Ingest (' + uploadFiles.length + ')'"></span>
+          </button>
+        </div>
+
+        <!-- Upload Progress -->
+        <div x-show="uploadLoading" class="mt-4">
+          <div class="w-full bg-slate-700/50 rounded-full h-2 overflow-hidden">
+            <div class="bg-brand-500 h-2 rounded-full transition-all duration-300" :style="'width:' + uploadProgress + '%'"></div>
+          </div>
+          <p class="text-xs text-slate-500 mt-1.5 text-center" x-text="uploadProgressText"></p>
+        </div>
+      </div>
+
+      <!-- Upload Results -->
+      <template x-if="uploadResults.length > 0">
+        <div class="bg-slate-800/50 border border-slate-700/50 rounded-xl p-6 fade-in">
+          <h3 class="text-sm font-semibold text-slate-300 mb-3">Upload Results</h3>
+          <div class="space-y-2">
+            <template x-for="(r, i) in uploadResults" :key="i">
+              <div class="bg-slate-900/50 rounded-lg p-4 flex items-center gap-4"
+                :class="r.status === 'completed' ? 'border border-emerald-500/20' : 'border border-red-500/20'">
+                <div class="w-8 h-8 rounded-lg flex items-center justify-center shrink-0"
+                  :class="r.status === 'completed' ? 'bg-emerald-500/10' : 'bg-red-500/10'">
+                  <svg x-show="r.status === 'completed'" class="w-4 h-4 text-emerald-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M5 13l4 4L19 7"/></svg>
+                  <svg x-show="r.status !== 'completed'" class="w-4 h-4 text-red-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M6 18L18 6M6 6l12 12"/></svg>
+                </div>
+                <div class="flex-1 min-w-0">
+                  <p class="text-sm font-medium text-slate-200 truncate" x-text="r.filename"></p>
+                  <p class="text-xs text-slate-500" x-text="r.status === 'completed' ? r.chunks + ' chunks, ' + r.entities + ' entities, ' + r.relations + ' relations' : r.status"></p>
+                </div>
+                <span class="text-xs text-slate-500 shrink-0" x-text="(r.processing_time_ms / 1000).toFixed(1) + 's'"></span>
+              </div>
+            </template>
+          </div>
+        </div>
+      </template>
+
+      <!-- Batch -->
+      <div class="bg-slate-800/50 border border-slate-700/50 rounded-xl p-6">
+        <div class="flex items-start justify-between mb-2">
+          <h2 class="text-lg font-bold">Batch Ingest</h2>
+          <span class="text-[10px] bg-purple-600/20 text-purple-300 px-2 py-0.5 rounded-full font-medium">Server-side</span>
+        </div>
+        <div class="bg-slate-900/40 border border-slate-700/30 rounded-lg p-4 mb-4">
+          <p class="text-xs text-slate-400 leading-relaxed">
+            <span class="font-semibold text-slate-300">What is Batch Ingest?</span><br>
+            Batch Ingest processes an entire <span class="text-brand-400">directory of files already on the server</span> in one operation.
+            Point it to a folder path, choose file patterns (e.g. <code class="text-brand-300">*.pdf, *.csv</code>), and the system will:
+          </p>
+          <ul class="text-xs text-slate-400 mt-2 space-y-1 ml-4 list-disc">
+            <li>Scan the directory (optionally recursively into subdirectories)</li>
+            <li>Parse each matching file (PDF, TXT, CSV, XLSX, HTML, JSON, images)</li>
+            <li>Split documents into chunks and extract named entities (people, orgs, locations, etc.)</li>
+            <li>Build a knowledge graph of relationships in Neo4j</li>
+            <li>Generate vector embeddings and store them in Qdrant for semantic search</li>
+          </ul>
+          <p class="text-xs text-slate-500 mt-2">
+            Use this when you have files pre-staged on the server (e.g. mounted volumes, shared drives). For uploading files from your computer, use the <span class="text-brand-400">Upload section above</span>.
+          </p>
+        </div>
+        <div class="space-y-4">
+          <div>
+            <label class="block text-xs text-slate-400 mb-1.5">Directory Path</label>
+            <input type="text" x-model="batchForm.directory_path" placeholder="./data/raw"
+              class="w-full bg-slate-900/50 border border-slate-600/50 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:border-brand-500 placeholder-slate-500">
+          </div>
+          <div>
+            <label class="block text-xs text-slate-400 mb-1.5">File Patterns (comma-separated)</label>
+            <input type="text" x-model="batchPatternsRaw" placeholder="*.pdf, *.txt, *.csv"
+              class="w-full bg-slate-900/50 border border-slate-600/50 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:border-brand-500 placeholder-slate-500">
+          </div>
+          <label class="flex items-center gap-2 text-xs text-slate-400 cursor-pointer">
+            <input type="checkbox" x-model="batchForm.recursive" class="rounded bg-slate-700 border-slate-600 text-brand-500 focus:ring-brand-500">
+            Recursive (include subdirectories)
+          </label>
+          <button @click="submitBatchIngest()" :disabled="batchLoading || !batchForm.directory_path.trim()"
+            class="bg-purple-600 hover:bg-purple-700 disabled:opacity-40 disabled:cursor-not-allowed text-white px-6 py-2.5 rounded-lg text-sm font-medium transition-colors flex items-center gap-2">
+            <svg x-show="batchLoading" class="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
+            <span x-text="batchLoading ? 'Processing...' : 'Batch Ingest'"></span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Batch Ingest Results -->
+      <template x-if="ingestResult">
+        <div class="bg-slate-800/50 border border-slate-700/50 rounded-xl p-6 fade-in">
+          <h3 class="text-sm font-semibold text-slate-300 mb-3">Batch Ingestion Result</h3>
+          <div class="grid grid-cols-2 md:grid-cols-5 gap-4 text-center">
+            <div>
+              <p class="text-xl font-bold text-brand-400" x-text="ingestResult.total_files ?? '--'"></p>
+              <p class="text-xs text-slate-500 mt-1">Total Files</p>
+            </div>
+            <div>
+              <p class="text-xl font-bold text-emerald-400" x-text="ingestResult.successful ?? '--'"></p>
+              <p class="text-xs text-slate-500 mt-1">Successful</p>
+            </div>
+            <div>
+              <p class="text-xl font-bold text-red-400" x-text="ingestResult.failed ?? '--'"></p>
+              <p class="text-xs text-slate-500 mt-1">Failed</p>
+            </div>
+            <div>
+              <p class="text-xl font-bold text-amber-400" x-text="(ingestResult.results || []).reduce((s,r) => s + (r.entities||0), 0)"></p>
+              <p class="text-xs text-slate-500 mt-1">Entities</p>
+            </div>
+            <div>
+              <p class="text-xl font-bold text-purple-400" x-text="((ingestResult.total_time_ms ?? 0) / 1000).toFixed(1) + 's'"></p>
+              <p class="text-xs text-slate-500 mt-1">Time</p>
+            </div>
+          </div>
+        </div>
+      </template>
+    </div>
+
+    <!-- ========== ENTITIES ========== -->
+    <div x-show="activeTab === 'entities'" x-cloak class="fade-in space-y-6">
+      <div class="bg-slate-800/50 border border-slate-700/50 rounded-xl p-6">
+        <h2 class="text-lg font-bold mb-4">Entity Search</h2>
+        <div class="flex gap-3">
+          <input type="text" x-model="entitySearch.query" placeholder="Search entities..."
+            @keydown.enter="searchEntities()"
+            class="flex-1 bg-slate-900/50 border border-slate-600/50 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:border-brand-500 placeholder-slate-500">
+          <input type="text" x-model="entitySearch.types" placeholder="Types (e.g. COMPANY,PERSON)"
+            class="w-48 bg-slate-900/50 border border-slate-600/50 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:border-brand-500 placeholder-slate-500">
+          <button @click="searchEntities()" :disabled="entityLoading"
+            class="bg-brand-600 hover:bg-brand-700 disabled:opacity-40 text-white px-5 py-2.5 rounded-lg text-sm font-medium transition-colors">
+            Search
+          </button>
+        </div>
+      </div>
+
+      <!-- Entity Results -->
+      <div x-show="entityResults.length > 0" class="space-y-3">
+        <template x-for="ent in entityResults" :key="ent.id">
+          <div class="bg-slate-800/50 border border-slate-700/50 rounded-xl p-5 hover:border-brand-500/30 transition-colors cursor-pointer"
+               @click="loadEntityContext(ent.id)">
+            <div class="flex items-center gap-3">
+              <div class="w-10 h-10 rounded-lg bg-brand-600/20 flex items-center justify-center text-brand-400 text-sm font-bold"
+                x-text="ent.entity_type.slice(0,2)"></div>
+              <div class="flex-1 min-w-0">
+                <p class="font-semibold text-slate-200 truncate" x-text="ent.name"></p>
+                <p class="text-xs text-slate-500" x-text="ent.entity_type + ' | Confidence: ' + (ent.confidence * 100).toFixed(0) + '%'"></p>
+              </div>
+              <svg class="w-5 h-5 text-slate-500" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M9 5l7 7-7 7"/></svg>
+            </div>
+          </div>
+        </template>
+      </div>
+
+      <!-- Entity Context Detail -->
+      <template x-if="entityContext">
+        <div class="bg-slate-800/50 border border-brand-500/30 rounded-xl p-6 fade-in space-y-5">
+          <div class="flex items-center justify-between">
+            <div>
+              <h3 class="text-lg font-bold" x-text="entityContext.entity.name"></h3>
+              <p class="text-xs text-slate-400" x-text="entityContext.entity.entity_type + ' | ID: ' + entityContext.entity.id"></p>
+            </div>
+            <button @click="entityContext = null" class="text-slate-400 hover:text-slate-200">
+              <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M6 18L18 6M6 6l12 12"/></svg>
+            </button>
+          </div>
+
+          <!-- Neighbors -->
+          <div x-show="entityContext.neighbors?.length > 0">
+            <h4 class="text-sm font-semibold text-slate-300 mb-2">Connected Entities</h4>
+            <div class="flex flex-wrap gap-2">
+              <template x-for="n in entityContext.neighbors" :key="n.id || n.name">
+                <span class="px-3 py-1 bg-slate-700/60 rounded-full text-xs text-slate-300" x-text="n.name || n.id"></span>
+              </template>
+            </div>
+          </div>
+
+          <!-- Relations -->
+          <div x-show="entityContext.relations?.length > 0">
+            <h4 class="text-sm font-semibold text-slate-300 mb-2">Relationships</h4>
+            <div class="space-y-1.5">
+              <template x-for="(r, i) in entityContext.relations" :key="i">
+                <div class="bg-slate-900/50 rounded-lg px-3 py-2 text-xs text-slate-400 flex items-center gap-2">
+                  <span class="text-slate-200" x-text="r.source || r.from || '--'"></span>
+                  <svg class="w-3 h-3 text-brand-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M13 7l5 5m0 0l-5 5m5-5H6"/></svg>
+                  <span class="text-brand-300" x-text="r.type || r.relation || '--'"></span>
+                  <svg class="w-3 h-3 text-brand-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M13 7l5 5m0 0l-5 5m5-5H6"/></svg>
+                  <span class="text-slate-200" x-text="r.target || r.to || '--'"></span>
+                </div>
+              </template>
+            </div>
+          </div>
+
+          <!-- Chunks -->
+          <div x-show="entityContext.chunks?.length > 0">
+            <h4 class="text-sm font-semibold text-slate-300 mb-2">Related Chunks</h4>
+            <div class="space-y-2 max-h-64 overflow-y-auto scrollbar-thin">
+              <template x-for="(c, i) in entityContext.chunks" :key="i">
+                <div class="bg-slate-900/50 rounded-lg px-3 py-2 text-xs text-slate-400" x-text="c.content || c.text || JSON.stringify(c)"></div>
+              </template>
+            </div>
+          </div>
+        </div>
+      </template>
+    </div>
+
+    <!-- ========== DATA ========== -->
+    <div x-show="activeTab === 'data'" x-cloak class="fade-in space-y-6">
+
+      <!-- Data Stats -->
+      <div class="bg-slate-800/50 border border-slate-700/50 rounded-xl p-6">
+        <div class="flex items-center justify-between mb-4">
+          <h2 class="text-lg font-bold">Data Statistics</h2>
+          <button @click="loadDataStats()" class="text-xs bg-slate-700 hover:bg-slate-600 text-slate-300 px-3 py-1.5 rounded-lg transition-colors">
+            Refresh
+          </button>
+        </div>
+        <pre x-show="dataStats" class="bg-slate-900/50 rounded-lg p-4 text-xs text-slate-400 overflow-auto max-h-64 scrollbar-thin"><code x-text="JSON.stringify(dataStats, null, 2)"></code></pre>
+      </div>
+
+      <!-- Export -->
+      <div class="bg-slate-800/50 border border-slate-700/50 rounded-xl p-6">
+        <h2 class="text-lg font-bold mb-4">Export Data</h2>
+        <div class="flex flex-wrap gap-3">
+          <select x-model="exportForm.export_type" class="bg-slate-900/50 border border-slate-600/50 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-brand-500">
+            <option value="entities">Entities</option>
+            <option value="relations">Relations</option>
+            <option value="documents">Documents</option>
+            <option value="all">All</option>
+          </select>
+          <select x-model="exportForm.format" class="bg-slate-900/50 border border-slate-600/50 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-brand-500">
+            <option value="json">JSON</option>
+            <option value="csv">CSV</option>
+          </select>
+          <button @click="exportData()" :disabled="exportLoading"
+            class="bg-cyan-600 hover:bg-cyan-700 disabled:opacity-40 text-white px-5 py-2 rounded-lg text-sm font-medium transition-colors">
+            Export
+          </button>
+        </div>
+        <div x-show="exportResult" class="mt-4">
+          <pre class="bg-slate-900/50 rounded-lg p-4 text-xs text-slate-400 overflow-auto max-h-96 scrollbar-thin"><code x-text="JSON.stringify(exportResult, null, 2)"></code></pre>
+        </div>
+      </div>
+
+      <!-- Cleanup -->
+      <div class="bg-slate-800/50 border border-red-500/20 rounded-xl p-6">
+        <h2 class="text-lg font-bold mb-2">Cleanup Orphaned Data</h2>
+        <p class="text-xs text-slate-500 mb-4">Removes orphaned entities and chunks with no parent documents.</p>
+        <button @click="if(confirm('Are you sure? This will delete orphaned data.')) cleanupData()"
+          class="bg-red-600 hover:bg-red-700 text-white px-5 py-2 rounded-lg text-sm font-medium transition-colors">
+          Run Cleanup
+        </button>
+        <pre x-show="cleanupResult" class="mt-4 bg-slate-900/50 rounded-lg p-4 text-xs text-slate-400 overflow-auto scrollbar-thin"><code x-text="JSON.stringify(cleanupResult, null, 2)"></code></pre>
+      </div>
+    </div>
+
+    <!-- ========== ADMIN ========== -->
+    <div x-show="activeTab === 'admin'" x-cloak class="fade-in space-y-6">
+
+      <!-- Create Key -->
+      <div class="bg-slate-800/50 border border-slate-700/50 rounded-xl p-6">
+        <h2 class="text-lg font-bold mb-4">Create API Key</h2>
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div>
+            <label class="block text-xs text-slate-400 mb-1.5">Key Name</label>
+            <input type="text" x-model="keyForm.name" placeholder="my-app"
+              class="w-full bg-slate-900/50 border border-slate-600/50 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-brand-500 placeholder-slate-500">
+          </div>
+          <div>
+            <label class="block text-xs text-slate-400 mb-1.5">Rate Limit (req/min)</label>
+            <input type="number" x-model.number="keyForm.rate_limit" min="1"
+              class="w-full bg-slate-900/50 border border-slate-600/50 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-brand-500">
+          </div>
+          <div>
+            <label class="block text-xs text-slate-400 mb-1.5">Daily Limit</label>
+            <input type="number" x-model.number="keyForm.daily_limit" min="1"
+              class="w-full bg-slate-900/50 border border-slate-600/50 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-brand-500">
+          </div>
+        </div>
+        <button @click="createKey()" :disabled="!keyForm.name.trim()"
+          class="mt-4 bg-brand-600 hover:bg-brand-700 disabled:opacity-40 text-white px-6 py-2.5 rounded-lg text-sm font-medium transition-colors">
+          Create Key
+        </button>
+        <div x-show="newKeyResult" class="mt-4 bg-emerald-900/30 border border-emerald-600/30 rounded-lg p-4">
+          <p class="text-xs text-emerald-400 font-semibold mb-1">New API Key Created - Save this now!</p>
+          <code class="text-sm text-emerald-300 font-mono break-all" x-text="newKeyResult?.api_key"></code>
+        </div>
+      </div>
+
+      <!-- List Keys -->
+      <div class="bg-slate-800/50 border border-slate-700/50 rounded-xl p-6">
+        <div class="flex items-center justify-between mb-4">
+          <h2 class="text-lg font-bold">API Keys</h2>
+          <button @click="listKeys()" class="text-xs bg-slate-700 hover:bg-slate-600 text-slate-300 px-3 py-1.5 rounded-lg transition-colors">
+            Refresh
+          </button>
+        </div>
+        <div x-show="apiKeys.length > 0" class="space-y-2">
+          <template x-for="k in apiKeys" :key="k.name">
+            <div class="bg-slate-900/50 rounded-lg p-4 flex items-center justify-between">
+              <div>
+                <p class="font-semibold text-sm" x-text="k.name"></p>
+                <p class="text-xs text-slate-500 mt-0.5">
+                  <span x-text="'Rate: ' + (k.rate_limit || '--') + '/min'"></span>
+                  <span class="mx-2">|</span>
+                  <span x-text="'Daily: ' + (k.daily_limit || '--')"></span>
+                  <span class="mx-2">|</span>
+                  <span :class="k.is_active ? 'text-emerald-400' : 'text-red-400'" x-text="k.is_active ? 'Active' : 'Revoked'"></span>
+                </p>
+              </div>
+              <button x-show="k.is_active" @click="if(confirm('Revoke this key?')) revokeKey(k)"
+                class="text-red-400 hover:text-red-300 text-xs border border-red-500/30 px-3 py-1 rounded-lg transition-colors">
+                Revoke
+              </button>
+            </div>
+          </template>
+        </div>
+        <p x-show="apiKeys.length === 0" class="text-sm text-slate-500">No API keys loaded. Click Refresh to load.</p>
+      </div>
+    </div>
+
+    <!-- ========== TOAST ========== -->
+    <div x-show="toast.show" x-transition.opacity class="fixed bottom-6 right-6 z-50 max-w-sm">
+      <div class="rounded-xl shadow-2xl px-5 py-4 flex items-start gap-3 border"
+        :class="toast.type === 'error' ? 'bg-red-900/90 border-red-700/50 text-red-200' : toast.type === 'success' ? 'bg-emerald-900/90 border-emerald-700/50 text-emerald-200' : 'bg-slate-800/90 border-slate-700/50 text-slate-200'">
+        <p class="text-sm" x-text="toast.message"></p>
+        <button @click="toast.show = false" class="shrink-0 opacity-60 hover:opacity-100">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M6 18L18 6M6 6l12 12"/></svg>
+        </button>
+      </div>
+    </div>
+  </main>
+
+<script>
+function app() {
+  return {
+    // State
+    activeTab: 'dashboard',
+    tabs: [
+      { id: 'dashboard', label: 'Dashboard' },
+      { id: 'ask',       label: 'Ask' },
+      { id: 'ingest',    label: 'Ingest' },
+      { id: 'entities',  label: 'Entities' },
+      { id: 'data',      label: 'Data' },
+      { id: 'admin',     label: 'Admin' },
+    ],
+    apiKey: 'graphrag_default_key_CHANGE_IN_PRODUCTION',
+    showApiKey: false,
+
+    // Dashboard
+    health: { status: 'unknown', services: {} },
+    stats: {},
+    metrics: {},
+    showEndpointBreakdown: false,
+
+    // Ask
+    askForm: { question: '', top_k: 5, include_sources: true, include_graph_paths: true },
+    askLoading: false,
+    askResult: null,
+
+    // Upload & Ingest
+    ingestForm: { extract_entities: true, generate_embeddings: true },
+    uploadFiles: [],
+    uploadLoading: false,
+    uploadProgress: 0,
+    uploadProgressText: '',
+    uploadResults: [],
+    uploadDragOver: false,
+    batchForm: { directory_path: '', recursive: true },
+    batchPatternsRaw: '*.pdf, *.txt, *.csv',
+    batchLoading: false,
+    ingestResult: null,
+
+    // Entities
+    entitySearch: { query: '', types: '' },
+    entityLoading: false,
+    entityResults: [],
+    entityContext: null,
+
+    // Data
+    dataStats: null,
+    exportForm: { export_type: 'entities', format: 'json' },
+    exportLoading: false,
+    exportResult: null,
+    cleanupResult: null,
+
+    // Admin
+    keyForm: { name: '', rate_limit: 100, daily_limit: 10000 },
+    newKeyResult: null,
+    apiKeys: [],
+
+    // Toast
+    toast: { show: false, message: '', type: 'info' },
+
+    // Init
+    async init() {
+      await this.loadHealth();
+    },
+
+    // Helpers
+    headers() {
+      return { 'Content-Type': 'application/json', 'X-API-Key': this.apiKey };
+    },
+    showToast(msg, type = 'info') {
+      this.toast = { show: true, message: msg, type };
+      setTimeout(() => this.toast.show = false, 5000);
+    },
+    computeAvgLatency() {
+      const latency = this.metrics.requests?.latency;
+      if (!latency) return '0';
+      const means = Object.values(latency).map(l => l.mean).filter(m => m > 0);
+      if (means.length === 0) return '0';
+      return (means.reduce((a, b) => a + b, 0) / means.length).toFixed(0);
+    },
+    computeSuccessRate() {
+      const total = this.metrics.requests?.total ?? 0;
+      const errors = this.metrics.requests?.errors?.total ?? 0;
+      if (total === 0) return '100.0';
+      return ((1 - errors / total) * 100).toFixed(1);
+    },
+    formatUptime(seconds) {
+      if (!seconds) return '--';
+      const h = Math.floor(seconds / 3600);
+      const m = Math.floor((seconds % 3600) / 60);
+      if (h > 0) return h + 'h ' + m + 'm';
+      return m + 'm';
+    },
+    getEndpointLatency(endpoint) {
+      const l = this.metrics.requests?.latency?.[endpoint];
+      if (!l) return '';
+      return l.mean > 1000 ? (l.mean / 1000).toFixed(1) + 's' : l.mean.toFixed(0) + 'ms';
+    },
+    async api(method, path, body = null) {
+      const opts = { method, headers: this.headers() };
+      if (body) opts.body = JSON.stringify(body);
+      const res = await fetch('/api/v1' + path, opts);
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ detail: res.statusText }));
+        throw new Error(err.detail || JSON.stringify(err));
+      }
+      return res.json();
+    },
+
+    // Dashboard
+    async loadHealth() {
+      try {
+        const r = await fetch('/api/v1/health');
+        this.health = await r.json();
+      } catch { this.health = { status: 'unreachable', services: {} }; }
+    },
+    async loadDashboard() {
+      await this.loadHealth();
+      try { this.stats = await this.api('GET', '/stats'); } catch {}
+      try { const r = await fetch('/metrics'); this.metrics = await r.json(); } catch {}
+      this.showToast('Dashboard refreshed', 'success');
+    },
+
+    // Ask
+    async submitAsk() {
+      if (!this.askForm.question.trim()) return;
+      this.askLoading = true;
+      this.askResult = null;
+      try {
+        this.askResult = await this.api('POST', '/ask', this.askForm);
+      } catch (e) { this.showToast('Error: ' + e.message, 'error'); }
+      this.askLoading = false;
+    },
+
+    // File Upload
+    handleFileSelect(event) {
+      const newFiles = Array.from(event.target.files);
+      this.uploadFiles = [...this.uploadFiles, ...newFiles];
+      event.target.value = '';
+    },
+    handleFileDrop(event) {
+      this.uploadDragOver = false;
+      const newFiles = Array.from(event.dataTransfer.files);
+      this.uploadFiles = [...this.uploadFiles, ...newFiles];
+    },
+    async submitUpload() {
+      if (this.uploadFiles.length === 0) return;
+      this.uploadLoading = true;
+      this.uploadResults = [];
+      this.uploadProgress = 0;
+      this.uploadProgressText = 'Preparing upload...';
+      try {
+        const formData = new FormData();
+        this.uploadFiles.forEach(f => formData.append('files', f));
+        formData.append('extract_entities', this.ingestForm.extract_entities);
+        formData.append('generate_embeddings', this.ingestForm.generate_embeddings);
+
+        this.uploadProgressText = 'Uploading ' + this.uploadFiles.length + ' file(s)...';
+        this.uploadProgress = 30;
+
+        const res = await fetch('/api/v1/ingest/upload', {
+          method: 'POST',
+          headers: { 'X-API-Key': this.apiKey },
+          body: formData,
+        });
+
+        this.uploadProgress = 90;
+        this.uploadProgressText = 'Processing response...';
+
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({ detail: res.statusText }));
+          throw new Error(err.detail || JSON.stringify(err));
+        }
+
+        this.uploadResults = await res.json();
+        this.uploadProgress = 100;
+
+        const ok = this.uploadResults.filter(r => r.status === 'completed').length;
+        const fail = this.uploadResults.length - ok;
+        this.uploadProgressText = 'Done!';
+        this.showToast(ok + ' file(s) ingested' + (fail > 0 ? ', ' + fail + ' failed' : ''), fail > 0 ? 'error' : 'success');
+        this.uploadFiles = [];
+      } catch (e) { this.showToast('Upload error: ' + e.message, 'error'); }
+      this.uploadLoading = false;
+    },
+    async submitBatchIngest() {
+      if (!this.batchForm.directory_path.trim()) return;
+      this.batchLoading = true;
+      this.ingestResult = null;
+      try {
+        const patterns = this.batchPatternsRaw ? this.batchPatternsRaw.split(',').map(s => s.trim()).filter(Boolean) : null;
+        this.ingestResult = await this.api('POST', '/ingest/batch', { ...this.batchForm, file_patterns: patterns });
+        this.showToast('Batch ingestion complete', 'success');
+      } catch (e) { this.showToast('Batch error: ' + e.message, 'error'); }
+      this.batchLoading = false;
+    },
+
+    // Entities
+    async searchEntities() {
+      if (!this.entitySearch.query.trim()) return;
+      this.entityLoading = true;
+      this.entityContext = null;
+      try {
+        const types = this.entitySearch.types ? this.entitySearch.types.split(',').map(s => s.trim()) : [];
+        let url = '/entity/search?query=' + encodeURIComponent(this.entitySearch.query) + '&limit=20';
+        types.forEach(t => url += '&entity_types=' + encodeURIComponent(t));
+        this.entityResults = await this.api('GET', url);
+        if (!Array.isArray(this.entityResults)) this.entityResults = this.entityResults.entities || [];
+      } catch (e) { this.showToast('Search error: ' + e.message, 'error'); this.entityResults = []; }
+      this.entityLoading = false;
+    },
+    async loadEntityContext(id) {
+      try {
+        this.entityContext = await this.api('GET', '/entity/' + encodeURIComponent(id) + '/context');
+      } catch (e) { this.showToast('Context error: ' + e.message, 'error'); }
+    },
+
+    // Data Management
+    async loadDataStats() {
+      try { this.dataStats = await this.api('GET', '/data/statistics'); }
+      catch (e) { this.showToast('Stats error: ' + e.message, 'error'); }
+    },
+    async exportData() {
+      this.exportLoading = true;
+      this.exportResult = null;
+      try { this.exportResult = await this.api('POST', '/data/export', this.exportForm); }
+      catch (e) { this.showToast('Export error: ' + e.message, 'error'); }
+      this.exportLoading = false;
+    },
+    async cleanupData() {
+      try {
+        this.cleanupResult = await this.api('DELETE', '/data/cleanup');
+        this.showToast('Cleanup complete', 'success');
+      } catch (e) { this.showToast('Cleanup error: ' + e.message, 'error'); }
+    },
+
+    // Admin
+    async createKey() {
+      if (!this.keyForm.name.trim()) return;
+      try {
+        this.newKeyResult = await this.api('POST', '/admin/keys/create', this.keyForm);
+        this.showToast('API key created', 'success');
+        this.keyForm.name = '';
+        this.listKeys();
+      } catch (e) { this.showToast('Create error: ' + e.message, 'error'); }
+    },
+    async listKeys() {
+      try {
+        const r = await this.api('GET', '/admin/keys/list');
+        this.apiKeys = r.keys || r || [];
+      } catch (e) { this.showToast('List error: ' + e.message, 'error'); }
+    },
+    async revokeKey(k) {
+      try {
+        await this.api('POST', '/admin/keys/revoke', { name: k.name });
+        this.showToast('Key revoked', 'success');
+        this.listKeys();
+      } catch (e) { this.showToast('Revoke error: ' + e.message, 'error'); }
+    },
+  };
+}
+</script>
+</body>
+</html>
